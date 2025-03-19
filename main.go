@@ -2,33 +2,62 @@ package main
 
 import (
 	"fmt"
-	"sync"
+	"net"
+	"sort"
+	"strconv"
 )
 
 // worker is a function to process the work it receives
-func worker(ports chan int, wg *sync.WaitGroup) {
+func worker(ports chan int, results chan int) {
+	var (
+		address = "scanme.nmap.org:%s"
+	)
 	for p := range ports {
-		fmt.Println(p)
-		wg.Done()
+		//convert the port number into a string
+		intToString := strconv.Itoa(p)
+
+		// dial the port using tcp
+		conn, err := net.Dial("tcp", fmt.Sprintf(address, intToString))
+		if err != nil {
+			results <- 0
+			continue
+		}
+		conn.Close()
+		results <- p
 	}
 }
 
 func main() {
-	//var (
-	//	address    = "scanme.nmap.org:%s"
-	//	successMsg = "%s open\n"
-	//)
-	var wg sync.WaitGroup
-
+	var (
+		successMsg = "%d open\n"
+	)
 	ports := make(chan int, 1)
+	results := make(chan int)
+	var openPorts []int
 
 	for i := 0; i < cap(ports); i++ {
-		go worker(ports, &wg)
+		go worker(ports, results)
 	}
-	for i := 1; i <= 1024; i++ {
-		wg.Add(1)
-		ports <- i
+
+	// send the port numbers to be scanned on the ports channel
+	go func() {
+		for i := 1; i <= 1024; i++ {
+			ports <- i
+		}
+	}()
+
+	for i := 0; i < 1024; i++ {
+		port := <-results
+		if port != 0 {
+			openPorts = append(openPorts, port)
+		}
 	}
-	wg.Wait()
 	close(ports)
+	close(results)
+
+	// sort the ports which were sent back as being open
+	sort.Ints(openPorts)
+	for _, port := range openPorts {
+		fmt.Printf(successMsg, port)
+	}
 }
